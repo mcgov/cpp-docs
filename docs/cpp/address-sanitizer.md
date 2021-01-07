@@ -1,40 +1,118 @@
----
-title: "AddressSanitizer and MSVC"
-description: "Efficient memory safety checking for C and C++ with MSVC & AddressSanitizer (ASan)."
-ms.date: 01/05/2021
-f1_keywords: ["ASan","sanitizers","AddressSanitizer"]
-helpviewer_keywords: ["ASan","sanitizers","AddressSanitizer","clang_rt.asan"]
----
+# Address Sanitizer - user interface
 
-# AddressSanitizer and MSVC
+## Introduction  - Developer Message
 
-AddressSanitizer (ASan) is an algorithm that can help developers identify memory safety issues in their C and C++ programs. Developers can use the /fsanitize=address flag to add ASan instrumentation to their native programs. At runtime, the ASan runtime replaces common allocation and memory manipulation functions with instrumented versions. Together, the instrumentation and ASan runtime enable developers to gather useful information about any memory safety issues that are encountered during execution.
+The Address Sanitizer is a compiler based technology [introduced by Google](https://www.usenix.org/conference/atc12/technical-sessions/presentation/serebryany).  This compiler and runtime technology has become the "defacto standard" in the industry for finding memory safety issues. We now offer this technology as a fully supported feature in Visual Studio. We shipped this (and up streamed our ASan runtime changes) to accommodate our customers with a simple re-compile strategy. Testing your build from this simple re-compile, can dramatically increase correctness, portability and security. If your existing code compiles with our current Windows compiler, then it will compile with the flag -fsanitize=address under any level of optimization and all other compatible flags (e.g., /RTC and is not currently compatible)
+
+Microsoft recommends using the Address Sanitizer in **three workflows**:
+
+- **Developer inner loop**
+    - Visual Studio - Command line
+    - Visual Studio - Project system with integrated IDE error reporting support.
+
+    
+- **CI/CD** - integrate, build and run unaltered, existing test assets
+    - CMake
+    - MSBuild
+
+- **Fuzzing** - Use the supported libFuzzer build
+    - [Azure OneFuzz](https://www.microsoft.com/security/blog/2020/09/15/microsoft-onefuzz-framework-open-source-developer-tool-fix-bugs/)
+    - Local Machine
+
+You can customize your builds as covered in this section
+
+- **Customization**
+    - Enhance - Hooking your allocators
+    - Remove - ASan at function of variable granularity
+
+There's extensive documentation for these platform dependent implementations of the Address Sanitizer technology.
+
+- [Google](https://clang.llvm.org/docs/AddressSanitizer.html)
+- [Apple](https://developer.apple.com/documentation/xcode/diagnosing_memory_thread_and_crash_issues_early)
+- [GCC](https://gcc.gnu.org/onlinedocs/gcc/Instrumentation-Options.html)
+
+This document will cover support for the above workflows on the Microsoft Windows 10 platform. We start with a simple command line use of the compiler and linker. We build upon that simple introduction following the structure of the outline seen in the **three workflows** listed above.
+
+For a complete indexed catalogue of errors this re-compile will find, see the [IDE support for errors](#ide-support-for-errors) section.
+
+**NOTE:** Current support is limited to x86 and AMD64 on Windows10. There is no support for -fsanitize=thread, -fsanitize=leak, -fsanitize=memory or -fsanitize=hwaddress.
+
+## Command line
+
+Adding the flag -fsanitize=address to your command line (with support to emit debug information) is all you need to compile,link and run an .EXE.
+
+             `cl -fsanitize=address /Zi file.cpp file2.cpp my3dparty.lib /Fe My.exe`
+
+The flag -fsanitize=address is compatible with all existing C or C++ optimization flags (e.g., /Od, /O1, /O2, /O2 /GL and PGO)
+
+**-fsanitize=address**
+
+Enable the injection of instrumentation code that inter-ops with the Asan runtime binaries that are automatically linked to the binary you are producing. This is a fast memory safety detector that just requires a recompile. Loads, stores, scopes, alloca, and CRT functions are hooked to detect hidden bugs like out-of-bounds, use-after-free, use-after-scope etc.. See [Error reporting](#error-reporting) for a complete list of errors currently detected at runtime.
+
+Unlike Clang/LLVM this option enables -fsanitize-address-use-after-scope by default and it can not be turned off at the command line or through the [Runtimes](#runtimes) ASAN_OPTIONS environment variable. The functionality for use-after-return requires code generation under an additional flag and environment variable.
+
+By default (legacy reasons) the CL driver infers the linker flag [/MT](https://docs.microsoft.com/en-us/cpp/build/reference/md-mt-ld-use-run-time-library?view=msvc-160) and that will link **static versions** of both the Asan and CRT libraries. If you want to link to the **dynamic version** of the CRT then use the following:
+
+             `cl -fsanitize=address /Zi /MD file.cpp file2.cpp my3dparty.lib /De My.exe`
+
+See the [Linker](#linker) section for details on more complex build scenarios. See the [runtime](#runtimes) section for an inventory of the Asan runtime libraries.
 
 
-## Custom allocators and ASan
+**-fsanitize-address-use-after-return**
 
-ASan provides interceptors for common allocator interfaces, malloc/free, new/delete, HeapAlloc/HeapFree (via RtlAllocateHeap/RtlFreeHeap). Many programs make use of custom allocators for one reason or another. An example would be any program using dlmalloc or a solution using the std::allocator interface and VirtualAlloc. ASan instrumentation does not automatically enlighten these allocators, so it falls to the programmer to 'enlighten' them when using ASan.
+Create the coded generation that will create a dual stack frame in the heap.  The stack frame in the heap will linger after the return from the function that created it. If an address of a local, allocated to a slot in the frame in the heap, then the code generation can later determine a stack-use-after-return error.
 
-### Manual ASan poisoning interface
+             `cl -fsanitize=address -fsanitize-address-use-after-return /Zi file.cpp file2.cpp my3dparty.lib /De My.exe`
 
-The interface for enlightening is simple but it imposes alignment restrictions on the user. The interface function prototypes:
-`void __asan_poison_memory_region(void const volatile *addr, size_t size);`
-`void __asan_unpoison_memory_region(void const volatile *addr, size_t size);`
+This is an opt in code generation which is much slower than just using -fsanize=address.  
 
-These functions are not needed when ASan is disabled, the interface header provides wrapper macros that will check whether ASan is enabled during compilation and omit the functions when ASan instrumentation is not enabled. These macros should be used rather than using the above functions directly:
-`#define ASAN_POISON_MEMORY_REGION(addr, size)`
-`#define ASAN_UNPOISON_MEMORY_REGION(addr, size)`
+## Visual Studio
 
-### Manual ASan poisoning and alignment
+### Project System
 
-ASan poisoning has alignment requirements: the user must add padding such that the padding ends on a byte boundary in the shadow memory. Since each bit in the ASan shadow memory encodes the state of a byte in real memory, this means that **the size + padding for each allocation must align on a 8 byte boundary.** If this requirement is not satisfied it can lead to incorrect bug reporting, including missed and false-positive reports.
+### Error reporting
 
-See the included examples for a little background. One is a small program to show what can go wrong with manual shadow memory poisoning. The second is an example implementation of manual poising using the `std::allocator` interface.
+## Compiler tool set
 
-To build and run the allocator example:
+### Compiler
 
-   `nmake allocator && allocator.exe`
+### Linker
+[Notes on linker behavior](https://microsoft.sharepoint.com/teams/DD_VC/_layouts/OneNote.aspx?id=%2Fteams%2FDD_VC%2FShared%20Documents%2FVisual%20C%2B%2B%20Team&wd=target%28BE%20Team%2FSecurity%2FCompiler%20Security%20V-Team.one%7CC2A34F56-6B09-4AB1-869B-DFD77BFD7399%2FNotes%20about%20vcasan%20and%20%5C%2Finferasanlibs%7C6D1BD27A-F55A-44BC-BF7C-AF6404C4C5C1%2F%29)
 
-To build the 'bad unpoisoning' example:
+## Address Sanitizer Runtimes
 
-   `nmake unpoison && unpoison.exe`
+This implementation of AddressSanitizer makes use of the Clang ASan runtime libraries. The runtime library version packaged with Visual Studio may contain features that are not yet available in the version packaged with Clang.
+
+### Function interception
+The runtime libraries intercept common memory management functions. [A complete list of intercepted functions is available here.](.\address-sanitizer-intercepted-functions.md)
+
+Interception is achieved through an assortment of hotpatching techniques.
+
+### Runtime features overview
+A complete overview of the features and design of the runtime is available here: [AddressSanitizer runtime overview](address-sanitizer-runtime.md)
+
+### Static (x86,AMD64)
+### Dynamic (x86,AMD64)
+### Runtime Flags
+
+Pick only the set we currently support
+https://github.com/google/sanitizers/wiki/AddressSanitizerFlags#run-time-flags 
+
+### Allocators
+
+## Build tools
+
+### CMake
+
+### MSBuild
+
+## Fuzing
+
+### Azure
+
+### Local Machine
+
+## See Also - technical overview
+
+This will cover a deep dive into the implementation and the runtime as a marketing tool to generate interest for the MSDN web page.
+

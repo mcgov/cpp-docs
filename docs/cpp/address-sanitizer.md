@@ -1,5 +1,8 @@
 # Address Sanitizer - user interface
 
+AddressSanitizer (ASan) is an algorithm that can help developers identify memory safety issues in their C and C++ programs. Developers can use the /fsanitize=address flag to add ASan instrumentation to their native programs. At runtime, the ASan runtime replaces common allocation and memory manipulation functions with instrumented versions. Together, the instrumentation and ASan runtime enable developers to gather useful information about any memory safety issues that are encountered during execution.
+
+
 ## Introduction  - Developer Message
 
 The Address Sanitizer is a compiler based technology [introduced by Google](https://www.usenix.org/conference/atc12/technical-sessions/presentation/serebryany).  This compiler and runtime technology has become the "defacto standard" in the industry for finding memory safety issues. We now offer this technology as a fully supported feature in Visual Studio. We shipped this (and up streamed our ASan runtime changes) to accommodate our customers with a simple re-compile strategy. Testing your build from this simple re-compile, can dramatically increase correctness, portability and security. If your existing code compiles with our current Windows compiler, then it will compile with the flag -fsanitize=address under any level of optimization and all other compatible flags (e.g., /RTC and is not currently compatible)
@@ -82,11 +85,6 @@ This is an opt in code generation which is much slower than just using -fsanize=
 ## Address Sanitizer Runtimes
 
 This implementation of AddressSanitizer makes use of the Clang ASan runtime libraries. The runtime library version packaged with Visual Studio may contain features that are not yet available in the version packaged with Clang.
-
-### Function interception
-The runtime libraries intercept common memory management functions. [A complete list of intercepted functions is available here.](.\address-sanitizer-intercepted-functions.md)
-
-Interception is achieved through an assortment of hotpatching techniques.
 
 ### Runtime features overview
 A complete overview of the features and design of the runtime is available here: [AddressSanitizer runtime overview](address-sanitizer-runtime.md)

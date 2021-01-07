@@ -6,15 +6,32 @@ f1_keywords: ["ASan","sanitizers","AddressSanitizer"]
 helpviewer_keywords: ["ASan","sanitizers","AddressSanitizer","clang_rt.asan"]
 ---
 
-# AddressSanitizer and MSVC
+# AddressSanitizer (ASan) Runtimes
 
-AddressSanitizer (ASan) is an algorithm that can help developers identify memory safety issues in their C and C++ programs. Developers can use the /fsanitize=address flag to add ASan instrumentation to their native programs. At runtime, the ASan runtime replaces common allocation and memory manipulation functions with instrumented versions. Together, the instrumentation and ASan runtime enable developers to gather useful information about any memory safety issues that are encountered during execution.
+ASan requires the installation of interceptors for common memory functions, for both allocators and memory manipulation functions. There are a variety of runtime libraries for targeting different executable types and CRT libraries. Unless the user is in an advanced situation and using the /nodefaultlib flag at link time, the compiler will link the appropriate library so long as the /fsanitize=address flag is passed at compile time.
 
-### Function interception
+Below is an inventory of runtime libraries related to ASan, where `arch` is either `i386` or `x86_64`.
 
-Interception is achieved through a number of hot-patching techniques, [these are well documented within the source code.](https://github.com/llvm/llvm-project/blob/1a2eaebc09c6a200f93b8beb37130c8b8aab3934/compiler-rt/lib/interception/interception_win.cpp#L11)
+> [!NOTE]
+> These libraries keep the Clang conventions for architecture names. The Microsoft Visual C++  convention would be x86 and x64 rather than i386 and x86_64. They refer to the same architectures.
 
-The runtime libraries intercept many common memory management and manipulation functions. [A complete list of intercepted functions is available here.](.\address-sanitizer-intercepted-functions.md) 
+| CRT Flag | DLL or EXE | DEBUG? | ASan Runtime Libraries                                                             |
+|----------|------------|--------|------------------------------------------------------------------------------------|
+| MT       | EXE        | NO     | `clang_rt.asan-{arch}<br>clang_rt.asan_cxx-{arch}`                                   |
+| MT       | DLL        | NO     | `clang_rt.asan_dll_thunk-{arch}`                                                     |
+| MD       | EITHER     | NO     | `clang_rt.asan_dynamic-{arch}<br>clang_rt.asan_dynamic_runtime_thunk-{arch}`         |
+| MT       | EXE        | YES    | `clang_rt.asan_dbg-{arch}<br>clang_rt.asan_dbg_cxx-{arch}`                           |
+| MT       | DLL        | YES    | `clang_rt.asan_dbg_dll_thunk-{arch}`                                                 |
+| MD       | EITHER     | YES    | `clang_rt.asan_dbg_dynamic-{arch}<br>clang_rt.asan_dbg_dynamic_runtime_thunk-{arch}` |
+
+
+ During the ASan compiler pass, the compiler generates metadata needed for stack and global variables and inserts checks for memory accesses throughout the program. The ASan runtime libraries install function interceptors during program initialization; these interceptors generate the necessary metadata and insert checks in common string and memory functions. Combined, this extra data is used to generate ASan reports when a memory corruption situation is detected.
+
+## Function interception
+
+Interception is achieved through a number of hot-patching techniques, [these are best documented within the source code itself.](https://github.com/llvm/llvm-project/blob/1a2eaebc09c6a200f93b8beb37130c8b8aab3934/compiler-rt/lib/interception/interception_win.cpp#L11)
+
+The runtime libraries intercept many common memory management and manipulation functions. [A complete list of intercepted functions is available here.](.\address-sanitizer-intercepted-functions.md) The allocation interceptors manage metadata related to each allocation which is created. Each time an allocation is created or destroyed the allocator interceptors set specific values in the ASan shadow memory to indicate the current state of the allocation. When the compiler generates a memory access, it inserts a check that reads this metadata and determines whether the access is valid.
 
 ## Custom allocators and ASan
 
@@ -39,12 +56,4 @@ These functions are not needed when ASan is disabled, for convenience the asan i
 
 ASan poisoning has an alignment requirement: the user must add padding such that the padding ends on a byte boundary in the shadow memory. Since each bit in the ASan shadow memory encodes the state of a byte in real memory, this means that **the total size of each allocation including any padding must align on a 8 byte boundary.** If this requirement is not satisfied it can lead to incorrect bug reporting, including missed and false-positive reports.
 
-See the included examples for a little background. One is a small program to show what can go wrong with manual shadow memory poisoning. The second is an example implementation of manual poising using the `std::allocator` interface.
-
-To build and run the allocator example:
-
-   `nmake allocator && allocator.exe`
-
-To build the 'bad unpoisoning' example:
-
-   `nmake unpoison && unpoison.exe`
+[See the provided example programs for an illustration of the requirement and potential issues.](https://github.com/mcgov/asan_alignment_example) One is a small program to show what can go wrong with manual shadow memory poisoning. The second is an example implementation of manual poising using the `std::allocator` interface.

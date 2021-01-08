@@ -1,3 +1,11 @@
+---
+title: "AddressSanitizer list of intercepted functions (Ms Visual C++)"
+description: "Microsoft Visual C++ AddressSanitizer list of intercepted functions."
+ms.date: 01/05/2021
+f1_keywords: ["ASan","sanitizers","AddressSanitizer","interception"]
+helpviewer_keywords: ["ASan","sanitizers","AddressSanitizer","clang_rt.asan","intercepted functions", "interception"]
+---
+
 # AddressSanitizer list of intercepted functions (Windows)
 The AddressSanitier runtime hotpatches numerous functions to enable memory safety checks during program execution. The following is a non-exhaustive list of the functions that the ASan runtime monitors.
 

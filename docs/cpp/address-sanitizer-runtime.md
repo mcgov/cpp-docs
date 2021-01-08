@@ -1,9 +1,9 @@
 ---
-title: "AddressSanitizer and MSVC"
-description: "Efficient memory safety checking for C and C++ with MSVC & AddressSanitizer (ASan)."
+title: "AddressSanitizer Runtime"
+description: "Technical descrption of the AddressSanitizer runtime for Microsoft Visual C++."
 ms.date: 01/05/2021
 f1_keywords: ["ASan","sanitizers","AddressSanitizer"]
-helpviewer_keywords: ["ASan","sanitizers","AddressSanitizer","clang_rt.asan"]
+helpviewer_keywords: ["ASan","sanitizers","AddressSanitizer","clang_rt.asan","Clang runtime","runtime"]
 ---
 
 # AddressSanitizer (ASan) Runtimes
@@ -17,13 +17,12 @@ Below is an inventory of runtime libraries related to ASan, where `arch` is eith
 
 | CRT Flag | DLL or EXE | DEBUG? | ASan Runtime Libraries                                                             |
 |----------|------------|--------|------------------------------------------------------------------------------------|
-| MT       | EXE        | NO     | `clang_rt.asan-{arch}<br>clang_rt.asan_cxx-{arch}`                                   |
+| MT       | EXE        | NO     | `clang_rt.asan-{arch}, clang_rt.asan_cxx-{arch}`                                   |
 | MT       | DLL        | NO     | `clang_rt.asan_dll_thunk-{arch}`                                                     |
-| MD       | EITHER     | NO     | `clang_rt.asan_dynamic-{arch}<br>clang_rt.asan_dynamic_runtime_thunk-{arch}`         |
-| MT       | EXE        | YES    | `clang_rt.asan_dbg-{arch}<br>clang_rt.asan_dbg_cxx-{arch}`                           |
+| MD       | EITHER     | NO     | `clang_rt.asan_dynamic-{arch}, clang_rt.asan_dynamic_runtime_thunk-{arch}`         |
+| MT       | EXE        | YES    | `clang_rt.asan_dbg-{arch}, clang_rt.asan_dbg_cxx-{arch}`                           |
 | MT       | DLL        | YES    | `clang_rt.asan_dbg_dll_thunk-{arch}`                                                 |
-| MD       | EITHER     | YES    | `clang_rt.asan_dbg_dynamic-{arch}<br>clang_rt.asan_dbg_dynamic_runtime_thunk-{arch}` |
-
+| MD       | EITHER     | YES    | `clang_rt.asan_dbg_dynamic-{arch}, clang_rt.asan_dbg_dynamic_runtime_thunk-{arch}` |
 
  During the ASan compiler pass, the compiler generates metadata needed for stack and global variables and inserts checks for memory accesses throughout the program. The ASan runtime libraries install function interceptors during program initialization; these interceptors generate the necessary metadata and insert checks in common string and memory functions. Combined, this extra data is used to generate ASan reports when a memory corruption situation is detected.
 
@@ -40,6 +39,7 @@ ASan provides interceptors for common allocator interfaces, malloc/free, new/del
 ## Manual ASan poisoning interface
 
 The interface for enlightening is simple but it imposes alignment restrictions on the user. The interface function prototypes are as follows:
+
 ```
 void __asan_poison_memory_region(void const volatile *addr, size_t size);
 void __asan_unpoison_memory_region(void const volatile *addr, size_t size);
@@ -57,3 +57,23 @@ These functions are not needed when ASan is disabled, for convenience the asan i
 ASan poisoning has an alignment requirement: the user must add padding such that the padding ends on a byte boundary in the shadow memory. Since each bit in the ASan shadow memory encodes the state of a byte in real memory, this means that **the total size of each allocation including any padding must align on a 8 byte boundary.** If this requirement is not satisfied it can lead to incorrect bug reporting, including missed and false-positive reports.
 
 [See the provided example programs for an illustration of the requirement and potential issues.](https://github.com/mcgov/asan_alignment_example) One is a small program to show what can go wrong with manual shadow memory poisoning. The second is an example implementation of manual poising using the `std::allocator` interface.
+
+## Run-time Flags
+
+Microsoft Visual C++ uses a runtime based on the [Clang ASan runtime from the llvm-project repository.](https://github.com/llvm/llvm-project) Because of this, most runtime flags are shared between the two verions. [A complete list of the public Clang runtime flags is available here.](https://github.com/google/sanitizers/wiki/SanitizerCommonFlags) There are some differences detailed here, if you discover options that do not function as expected please file a feedback ticket in the [Visual Studio developer community.](https://developercommunity.visualstudio.com)
+
+### Unsupported ASan Options
+
+- detect_container_overflow
+- unmap_shadow_on_exit
+
+> [!NOTE]
+> The ASan option `halt_on_error` does not function the way you might expect. In both the Clang and the Microsoft Visual C++ run-time libraries many error types have been designated as non-continuable, including most memory corruption errors.
+
+### Microsoft Visual C++ specific ASan runtime flags:
+
+- `windows_hook_legacy_allocators`
+  - Boolean, set to `true` to enable interception of [GlobalAlloc](https://docs.microsoft.com/windows/win32/api/winbase/nf-winbase-globalalloc) and [LocalAlloc](https://docs.microsoft.com/windows/win32/api/winbase/nf-winbase-localalloc) allocators.
+
+> [!NOTE]
+> The option `windows_hook_legacy_allocators` is not currently available in the public llvm-project runtime as of this date. The option may eventually be contributed back to the public project; however, this is dependent on code review and community acceptance.
